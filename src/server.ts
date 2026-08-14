@@ -312,7 +312,37 @@ router.get('/api/getShelterMembers', async (ctx) => {
         }
     };
 });
+// ============================================================
+// 11. 🎮 领取离线收益
+// ============================================================
+router.post('/api/claimOfflineRewards', async (ctx) => {
+    const body: any = ctx.request.body;
+    const { roomId, food, water } = body;
 
+    if (!roomId) {
+        ctx.status = 400;
+        ctx.body = { code: -1, message: 'roomId 不能为空' };
+        return;
+    }
+
+    if (!shelters[roomId]) {
+        ctx.status = 404;
+        ctx.body = { code: -1, message: '避难所不存在' };
+        return;
+    }
+
+    shelters[roomId].resources.food += food || 0;
+    shelters[roomId].resources.water += water || 0;
+
+    ctx.body = {
+        code: 0,
+        message: '领取离线收益成功',
+        data: {
+            food: shelters[roomId].resources.food,
+            water: shelters[roomId].resources.water
+        }
+    };
+});
 // ============================================================
 // 应用中间件和路由
 // ============================================================
