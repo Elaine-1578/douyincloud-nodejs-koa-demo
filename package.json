@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "description": "Nodejs koa demo project which can be deployed on douyincloud",
   "main": "dist/server.js",
-  "scripts": {
-    "build": "tsc",
-    "serve": "node dist/server.js",
-    "start": "npm run serve"
-  },
+ "scripts": {
+  "build": "tsc",
+  "serve": "node dist/server.js",
+  "start": "npm run build && node dist/server.js"
+},
   "keywords": [
     "koa",
     "douyincloud"
