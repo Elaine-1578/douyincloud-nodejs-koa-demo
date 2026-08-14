@@ -344,6 +344,55 @@ router.post('/api/claimOfflineRewards', async (ctx) => {
     };
 });
 // ============================================================
+// 多维度排行榜
+// ============================================================
+router.get('/api/getRanking', async (ctx) => {
+  const type = ctx.query.type || 'level';
+  var allUsers = Object.values(users);
+  var sorted = [];
+  
+  if (type === 'level') {
+    sorted = allUsers
+      .sort(function(a: any, b: any) { return b.level - a.level; })
+      .slice(0, 10)
+      .map(function(u: any, index: number) {
+        return { rank: index + 1, nickname: u.nickname, score: 'Lv.' + u.level };
+      });
+  } else if (type === 'resource') {
+    sorted = allUsers
+      .sort(function(a: any, b: any) {
+        var totalA = a.resources ? a.resources.food + a.resources.water + a.resources.money : 0;
+        var totalB = b.resources ? b.resources.food + b.resources.water + b.resources.money : 0;
+        return totalB - totalA;
+      })
+      .slice(0, 10)
+      .map(function(u: any, index: number) {
+        var total = u.resources ? u.resources.food + u.resources.water + u.resources.money : 0;
+        return { rank: index + 1, nickname: u.nickname, score: total + '物资' };
+      });
+  } else if (type === 'defense') {
+    sorted = allUsers
+      .sort(function(a: any, b: any) {
+        var defA = a.defenseScore || 0;
+        var defB = b.defenseScore || 0;
+        return defB - defA;
+      })
+      .slice(0, 10)
+      .map(function(u: any, index: number) {
+        var score = u.defenseScore || 0;
+        return { rank: index + 1, nickname: u.nickname, score: score + '分' };
+      });
+  }
+
+  ctx.body = {
+    code: 0,
+    data: {
+      type: type,
+      list: sorted
+    }
+  };
+});
+// ============================================================
 // 应用中间件和路由
 // ============================================================
 app.use(bodyParser());
