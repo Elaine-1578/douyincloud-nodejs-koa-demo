@@ -15,6 +15,7 @@ fi
 # 检查 server.js 是否存在
 if [ -f "dist/server.js" ]; then
     echo "server.js found, starting..."
+    # 直接运行 node，不通过 npm
     node dist/server.js
 else
     echo "ERROR: dist/server.js not found!"
