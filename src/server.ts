@@ -383,6 +383,121 @@ router.post('/api/claimOfflineRewards', async (ctx) => {
 });
 
 // ============================================================
+// 11. 🎮 接收抖音弹幕回调（内网专线）
+// ============================================================
+router.post('/api/danmaku', async (ctx) => {
+    const body: any = ctx.request.body;
+    console.log('📨 收到弹幕回调:', JSON.stringify(body));
+
+    // 尝试从不同字段获取数据
+    const content = body.content || body.text || body.msg || '';
+    const userId = body.user_id || body.from_user_id || body.open_id || '';
+    const roomId = body.room_id || body.live_room_id || '';
+
+    if (!content || !userId || !roomId) {
+        ctx.body = { code: 0, message: 'ok' };
+        return;
+    }
+
+    console.log(`💬 弹幕: "${content}" 来自 ${userId} 房间 ${roomId}`);
+
+    // 检查用户是否存在，不存在则自动创建
+    if (!users[userId]) {
+        users[userId] = {
+            userId: userId,
+            nickname: `弹幕玩家_${userId.slice(-4)}`,
+            level: 1,
+            exp: 0,
+            ability: '无',
+            shelterId: null,
+            roomId: roomId,
+            resources: { food: 0, water: 0, medicine: 0, money: 0 },
+            defenseScore: 0,
+            lastLoginTime: new Date()
+        };
+        console.log(`✅ 弹幕用户自动创建: ${userId}`);
+    }
+
+    // 检查避难所
+    if (!shelters[roomId]) {
+        shelters[roomId] = {
+            shelterId: 'shelter_' + roomId,
+            roomId: roomId,
+            level: 1,
+            exp: 0,
+            members: [],
+            resources: { food: 100, water: 80, medicine: 20, money: 50 },
+            storageMax: 500,
+            npcCount: 0,
+            defenseWeapons: [],
+            createdAt: new Date()
+        };
+        console.log(`✅ 弹幕触发新避难所创建: roomId=${roomId}`);
+    }
+
+    // ===== 解析弹幕指令 =====
+    const msg = content.trim();
+
+    // 1. 加入 / 扣1
+    if (msg === '加入' || msg === '1' || msg === '扣1' || msg.includes('加入')) {
+        if (!shelters[roomId].members.includes(userId)) {
+            shelters[roomId].members.push(userId);
+            users[userId].shelterId = shelters[roomId].shelterId;
+            console.log(`✅ 弹幕加入: ${userId} 加入避难所 ${roomId}`);
+            ctx.body = { code: 0, message: '加入成功' };
+            return;
+        }
+        ctx.body = { code: 0, message: '已加入' };
+        return;
+    }
+
+    // 2. 搜索地图
+    if (msg.includes('搜索') || msg.includes('搜')) {
+        let mapName = 'school';
+        if (msg.includes('学校')) mapName = 'school';
+        else if (msg.includes('医院')) mapName = 'hospital';
+        else if (msg.includes('超市')) mapName = 'supermarket';
+        else if (msg.includes('武器') || msg.includes('武库')) mapName = 'armory';
+        else if (msg.includes('宿舍')) mapName = 'dormitory';
+        else if (msg.includes('后山')) mapName = 'mountain';
+        else if (msg.includes('地下')) mapName = 'basement';
+        else if (msg.includes('街道') || msg.includes('街')) mapName = 'street';
+        else if (msg.includes('便利')) mapName = 'convenience';
+
+        const rewards = {
+            food: Math.floor(Math.random() * 30) + 10,
+            water: Math.floor(Math.random() * 20) + 5,
+            exp: Math.floor(Math.random() * 20) + 10
+        };
+
+        shelters[roomId].resources.food += rewards.food;
+        shelters[roomId].resources.water += rewards.water;
+        shelters[roomId].resources.medicine += Math.floor(Math.random() * 5);
+        shelters[roomId].resources.money += Math.floor(Math.random() * 10) + 1;
+        shelters[roomId].exp = (shelters[roomId].exp || 0) + rewards.exp;
+
+        if (shelters[roomId].exp >= shelters[roomId].level * 100) {
+            shelters[roomId].level += 1;
+            shelters[roomId].exp = 0;
+            console.log(`🎉 避难所 ${roomId} 升级到 Lv.${shelters[roomId].level}`);
+        }
+
+        console.log(`✅ 弹幕搜索: ${mapName} 完成`);
+        ctx.body = { code: 0, message: '搜索成功' };
+        return;
+    }
+
+    // 3. 排行榜
+    if (msg.includes('排行榜') || msg.includes('排名') || msg.includes('榜')) {
+        console.log(`✅ 弹幕查看排行榜`);
+        ctx.body = { code: 0, message: '查看排行榜' };
+        return;
+    }
+
+    ctx.body = { code: 0, message: 'ok' };
+});
+
+// ============================================================
 // 应用中间件和路由
 // ============================================================
 app.use(bodyParser());
