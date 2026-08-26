@@ -192,7 +192,7 @@ router.get('/api/ping', async ctx => {
   ctx.body = { code: 0, message: 'pong', data: { serverTime: new Date().toISOString() } };
 });
 
-// ----- 登录 -----
+// ----- 登录（含天气） -----
 router.post('/api/login', async ctx => {
   const body: any = ctx.request.body;
   const userId = body.userId || 'user_' + Date.now();
@@ -206,7 +206,6 @@ router.post('/api/login', async ctx => {
     if (isDbConnected) await shelter.save();
   }
 
-  // 检查天气是否需要刷新
   if (shelter.weather && shouldRefreshWeather(shelter.weather.updatedAt)) {
     const newWeather = refreshWeather();
     shelter.weather.id = newWeather.id;
@@ -246,7 +245,6 @@ router.get('/api/getShelterInfo', async ctx => {
 
   const shelter = await getOrCreateShelter(roomId);
 
-  // 检查天气是否需要刷新
   if (shelter.weather && shouldRefreshWeather(shelter.weather.updatedAt)) {
     const newWeather = refreshWeather();
     shelter.weather.id = newWeather.id;
