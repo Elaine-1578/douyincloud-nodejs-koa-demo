@@ -1,7 +1,3 @@
-// ============================================================
-// 末日庇护所 - 主服务器（完整整合版）
-// ============================================================
-
 import Koa from 'koa';
 import bodyParser from 'koa-bodyparser';
 import Router from '@koa/router';
@@ -17,12 +13,14 @@ import { VIP_TABLE } from './config/VIPTable';
 import { PET_TABLE } from './config/PetTable';
 import { ABILITY_TABLE, randomDrawAbility, getBasicAbilities, getRareAbilities } from './config/AbilityTable';
 import { ITEM_TABLE, getItemById } from './config/ItemTable';
+import { WEATHER_LIST, getRandomWeather, getWeatherEffect, isHighAbility } from './config/WeatherTable';
 
 // ===== 服务层 =====
 import { getLevelInfo, addExp, calcTotalPower, canLevelUp } from './services/levelService';
 import { getVIPInfo, getExpBonus, getRareBonus, getDailyPullLimit, canDrawToday } from './services/vipService';
 import { getPetInfo, levelUpPet, calcPetPower, getPetCounterBonus, getAllPets } from './services/petService';
 import { drawAbility, drawTenAbilities, getPityInfo, equipAbility, replaceAbility } from './services/abilityService';
+import { shouldRefreshWeather, refreshWeather, getCurrentWeatherInfo, calculateAbilityWithWeather, getWeatherName, getWeatherIcon } from './services/weatherService';
 
 const app = new Koa();
 const router = new Router();
@@ -92,6 +90,12 @@ const ShelterSchema = new mongoose.Schema<IShelter>({
   relicSlots: { type: [String], default: [] },
   npcCount: { type: Number, default: 0 },
   defenseWeapons: { type: [String], default: [] },
+  weather: {
+    id: { type: String, default: 'sunny' },
+    name: { type: String, default: '晴朗' },
+    icon: { type: String, default: '☀️' },
+    updatedAt: { type: Date, default: Date.now }
+  },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 });
@@ -123,13 +127,53 @@ async function getOrCreateShelter(roomId: string) {
   if (isDbConnected) {
     let shelter = await Shelter.findOne({ roomId });
     if (!shelter) {
-      shelter = new Shelter(createDefaultShelter(roomId));
+      const defaultWeather = getRandomWeather();
+      shelter = new Shelter({
+        shelterId: `shelter_${roomId}`,
+        roomId,
+        level: 1,
+        exp: 0,
+        members: [],
+        resources: { food: 100, water: 80, medicine: 20, money: 50 },
+        storageMax: 500,
+        relicSlots: [],
+        npcCount: 0,
+        defenseWeapons: [],
+        weather: {
+          id: defaultWeather.id,
+          name: defaultWeather.name,
+          icon: defaultWeather.icon,
+          updatedAt: new Date()
+        },
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
       await shelter.save();
     }
     return shelter;
   }
   if (!shelters[roomId]) {
-    shelters[roomId] = createDefaultShelter(roomId);
+    const defaultWeather = getRandomWeather();
+    shelters[roomId] = {
+      shelterId: `shelter_${roomId}`,
+      roomId,
+      level: 1,
+      exp: 0,
+      members: [],
+      resources: { food: 100, water: 80, medicine: 20, money: 50 },
+      storageMax: 500,
+      relicSlots: [],
+      npcCount: 0,
+      defenseWeapons: [],
+      weather: {
+        id: defaultWeather.id,
+        name: defaultWeather.name,
+        icon: defaultWeather.icon,
+        updatedAt: new Date()
+      },
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
   }
   return shelters[roomId];
 }
@@ -162,6 +206,16 @@ router.post('/api/login', async ctx => {
     if (isDbConnected) await shelter.save();
   }
 
+  // 检查天气是否需要刷新
+  if (shelter.weather && shouldRefreshWeather(shelter.weather.updatedAt)) {
+    const newWeather = refreshWeather();
+    shelter.weather.id = newWeather.id;
+    shelter.weather.name = newWeather.name;
+    shelter.weather.icon = newWeather.icon;
+    shelter.weather.updatedAt = newWeather.updatedAt;
+    if (isDbConnected) await shelter.save();
+  }
+
   ctx.body = {
     code: 0,
     message: '登录成功',
@@ -175,12 +229,13 @@ router.post('/api/login', async ctx => {
       vipLevel: user.vipLevel,
       diamonds: user.diamonds,
       shelterId: shelter.shelterId,
-      roomId: shelter.roomId
+      roomId: shelter.roomId,
+      weather: shelter.weather || { icon: '☀️', name: '晴朗' }
     }
   };
 });
 
-// ----- 获取避难所信息 -----
+// ----- 获取避难所信息（含天气） -----
 router.get('/api/getShelterInfo', async ctx => {
   const roomId = ctx.query.roomId as string;
   if (!roomId) {
@@ -190,6 +245,17 @@ router.get('/api/getShelterInfo', async ctx => {
   }
 
   const shelter = await getOrCreateShelter(roomId);
+
+  // 检查天气是否需要刷新
+  if (shelter.weather && shouldRefreshWeather(shelter.weather.updatedAt)) {
+    const newWeather = refreshWeather();
+    shelter.weather.id = newWeather.id;
+    shelter.weather.name = newWeather.name;
+    shelter.weather.icon = newWeather.icon;
+    shelter.weather.updatedAt = newWeather.updatedAt;
+    if (isDbConnected) await shelter.save();
+  }
+
   const memberList = shelter.members.map((uid: string) => ({
     userId: uid,
     nickname: `幸存者_${uid.slice(-4)}`,
@@ -208,8 +274,35 @@ router.get('/api/getShelterInfo', async ctx => {
       resources: shelter.resources,
       storageMax: shelter.storageMax,
       npcCount: shelter.npcCount || 0,
-      defenseWeapons: shelter.defenseWeapons || []
+      defenseWeapons: shelter.defenseWeapons || [],
+      weather: shelter.weather || { icon: '☀️', name: '晴朗' }
     }
+  };
+});
+
+// ----- 获取天气 -----
+router.get('/api/getWeather', async ctx => {
+  const roomId = ctx.query.roomId as string;
+  if (!roomId) {
+    ctx.status = 400;
+    ctx.body = { code: -1, message: 'roomId 不能为空' };
+    return;
+  }
+
+  const shelter = await getOrCreateShelter(roomId);
+  
+  if (shelter.weather && shouldRefreshWeather(shelter.weather.updatedAt)) {
+    const newWeather = refreshWeather();
+    shelter.weather.id = newWeather.id;
+    shelter.weather.name = newWeather.name;
+    shelter.weather.icon = newWeather.icon;
+    shelter.weather.updatedAt = newWeather.updatedAt;
+    if (isDbConnected) await shelter.save();
+  }
+
+  ctx.body = {
+    code: 0,
+    data: shelter.weather || { icon: '☀️', name: '晴朗' }
   };
 });
 
@@ -359,21 +452,6 @@ router.post('/api/claimOfflineRewards', async ctx => {
   };
 });
 
-// ----- 获取等级信息（新） -----
-router.get('/api/getLevelInfo', async ctx => {
-  const userId = ctx.query.userId as string;
-  if (!userId) {
-    ctx.status = 400;
-    ctx.body = { code: -1, message: 'userId 不能为空' };
-    return;
-  }
-
-  const user = await getOrCreateUser(userId);
-  const info = getLevelInfo(user.exp);
-
-  ctx.body = { code: 0, data: info };
-});
-
 // ============================================================
 // 启动服务
 // ============================================================
@@ -387,6 +465,6 @@ connectDB().then(() => {
   app.listen(PORT, () => {
     console.log(`✅ 服务器已启动，端口: ${PORT}`);
     console.log(`📊 数据库状态: ${isDbConnected ? '已连接' : '内存模式'}`);
-    console.log(`📦 已加载配置: Level(150级), VIP(16级), Pet(6只), Ability(8个), Item(15种)`);
+    console.log(`📦 已加载配置: Level(150级), VIP(16级), Pet(6只), Ability(8个), Item(15种), Weather(5种)`);
   });
 });
