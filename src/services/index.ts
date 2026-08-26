@@ -6,3 +6,4 @@ export * from './levelService';
 export * from './vipService';
  export * from './petService';
  export * from './abilityService';
+export * from './weatherService';
