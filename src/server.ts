@@ -233,7 +233,6 @@ router.post('/api/login', async ctx => {
       shelterId: shelter.shelterId,
       roomId: shelter.roomId,
       weather: shelter.weather || { icon: '☀️', name: '晴朗' },
-      // 新增等级信息
       levelInfo: {
         level: user.level,
         exp: user.exp,
@@ -317,7 +316,7 @@ router.get('/api/getWeather', async ctx => {
   };
 });
 
-// ----- 搜索地图（含玩家经验） -----
+// ----- 搜索地图（含玩家经验 + levelUp 返回） -----
 router.post('/api/searchMap', async ctx => {
   const body: any = ctx.request.body;
   const { mapName, roomId, userId } = body;
@@ -338,6 +337,7 @@ router.post('/api/searchMap', async ctx => {
   let levelUp = false;
   let oldLevel = 1;
   let newLevel = 1;
+  let newExp = 0;
 
   if (userId) {
     const user = await getOrCreateUser(userId);
@@ -345,7 +345,8 @@ router.post('/api/searchMap', async ctx => {
     const result = addExp(user.exp, rewards.exp);
     user.exp = result.newExp;
     user.level = Math.min(result.newLevel, 150);
-    user.power = 100 + (user.level - 1) * 10; // 简单战力公式
+    user.power = 100 + (user.level - 1) * 10;
+    newExp = user.exp;
     if (result.leveledUp) {
       levelUp = true;
       newLevel = user.level;
@@ -372,17 +373,18 @@ router.post('/api/searchMap', async ctx => {
     if (isDbConnected) await shelter.save();
   }
 
+  // ===== 返回数据（确保 levelUp、newLevel、newExp 都在） =====
   ctx.body = {
     code: 0,
     message: `搜索 ${mapName} 完成`,
     data: {
-      mapName,
-      rewards,
+      mapName: mapName,
+      rewards: rewards,
       cooldown: 1800,
       levelUp: levelUp,
       oldLevel: oldLevel,
       newLevel: newLevel,
-      newExp: userId ? (await getOrCreateUser(userId)).exp : 0
+      newExp: newExp
     }
   };
 });
@@ -401,19 +403,16 @@ router.post('/api/afkReward', async ctx => {
   const user = await getOrCreateUser(userId);
   const shelter = await getOrCreateShelter(roomId);
 
-  // 挂机收益：每分钟 50 经验 + 食物/水
   const expGain = minutes * 50;
   const foodGain = minutes * 2;
   const waterGain = minutes * 1;
 
-  // 加玩家经验
   const result = addExp(user.exp, expGain);
   user.exp = result.newExp;
   user.level = Math.min(result.newLevel, 150);
   user.power = 100 + (user.level - 1) * 10;
   if (isDbConnected) await user.save();
 
-  // 加避难所资源
   shelter.resources.food += foodGain;
   shelter.resources.water += waterGain;
   if (isDbConnected) await shelter.save();
