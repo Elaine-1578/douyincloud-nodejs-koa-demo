@@ -2,6 +2,9 @@
 // 庇护所数据模型
 // ============================================================
 
+// ⚠️ 需要导入 getRandomWeather
+import { getRandomWeather } from '../config/WeatherTable';
+
 export interface IShelter {
   shelterId: string;
   roomId: string;          // 直播间号（唯一）
@@ -20,9 +23,16 @@ export interface IShelter {
   defenseWeapons: string[];
   createdAt: Date;
   updatedAt: Date;
+  weather: {
+    id: string;           // 当前天气ID
+    name: string;         // 天气名称
+    icon: string;         // 天气图标
+    updatedAt: Date;      // 上次刷新时间
+  };
 }
 
 export function createDefaultShelter(roomId: string): IShelter {
+  const defaultWeather = getRandomWeather();
   return {
     shelterId: `shelter_${roomId}`,
     roomId,
@@ -35,6 +45,12 @@ export function createDefaultShelter(roomId: string): IShelter {
     npcCount: 0,
     defenseWeapons: [],
     createdAt: new Date(),
-    updatedAt: new Date()
+    updatedAt: new Date(),
+    weather: {
+      id: defaultWeather.id,
+      name: defaultWeather.name,
+      icon: defaultWeather.icon,
+      updatedAt: new Date()
+    }
   };
 }
