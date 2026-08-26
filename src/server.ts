@@ -1,13 +1,28 @@
+// ============================================================
+// 末日庇护所 - 主服务器（完整整合版）
+// ============================================================
+
 import Koa from 'koa';
 import bodyParser from 'koa-bodyparser';
 import Router from '@koa/router';
 import mongoose from 'mongoose';
 
-// ===== 导入数据模型 =====
+// ===== 数据模型 =====
 import { IUser, createDefaultUser } from './models/User';
 import { IShelter, createDefaultShelter } from './models/Shelter';
-import { calcLevel, getPower } from './config/LevelTable';
-import { getVIPLevel, getVIPConfig } from './config/VIPTable';
+
+// ===== 配置表 =====
+import { LEVEL_TABLE } from './config/LevelTable';
+import { VIP_TABLE } from './config/VIPTable';
+import { PET_TABLE } from './config/PetTable';
+import { ABILITY_TABLE, randomDrawAbility, getBasicAbilities, getRareAbilities } from './config/AbilityTable';
+import { ITEM_TABLE, getItemById } from './config/ItemTable';
+
+// ===== 服务层 =====
+import { getLevelInfo, addExp, calcTotalPower, canLevelUp } from './services/levelService';
+import { getVIPInfo, getExpBonus, getRareBonus, getDailyPullLimit, canDrawToday } from './services/vipService';
+import { getPetInfo, levelUpPet, calcPetPower, getPetCounterBonus, getAllPets } from './services/petService';
+import { drawAbility, drawTenAbilities, getPityInfo, equipAbility, replaceAbility } from './services/abilityService';
 
 const app = new Koa();
 const router = new Router();
@@ -34,7 +49,7 @@ async function connectDB() {
   }
 }
 
-// ===== 定义 Mongoose Schema =====
+// ===== Mongoose Schema =====
 const UserSchema = new mongoose.Schema<IUser>({
   userId: { type: String, unique: true },
   openid: { type: String, unique: true },
@@ -84,7 +99,7 @@ const ShelterSchema = new mongoose.Schema<IShelter>({
 const User = mongoose.model<IUser>('User', UserSchema);
 const Shelter = mongoose.model<IShelter>('Shelter', ShelterSchema);
 
-// ===== 内存存储（数据库未连接时作为降级方案）=====
+// ===== 内存存储（降级） =====
 const users: any = {};
 const shelters: any = {};
 
@@ -98,7 +113,6 @@ async function getOrCreateUser(userId: string) {
     }
     return user;
   }
-  // 内存降级
   if (!users[userId]) {
     users[userId] = createDefaultUser(userId);
   }
@@ -120,17 +134,21 @@ async function getOrCreateShelter(roomId: string) {
   return shelters[roomId];
 }
 
-// ===== 健康检查 =====
+// ============================================================
+// 接口
+// ============================================================
+
+// ----- 健康检查 -----
 router.get('/health', ctx => {
   ctx.body = { status: 'ok', db: isDbConnected ? 'connected' : 'memory' };
 });
 
-// ===== 测试接口 =====
+// ----- Ping -----
 router.get('/api/ping', async ctx => {
   ctx.body = { code: 0, message: 'pong', data: { serverTime: new Date().toISOString() } };
 });
 
-// ===== 登录接口 =====
+// ----- 登录 -----
 router.post('/api/login', async ctx => {
   const body: any = ctx.request.body;
   const userId = body.userId || 'user_' + Date.now();
@@ -141,9 +159,7 @@ router.post('/api/login', async ctx => {
 
   if (!shelter.members.includes(userId)) {
     shelter.members.push(userId);
-    if (isDbConnected) {
-      await shelter.save();
-    }
+    if (isDbConnected) await shelter.save();
   }
 
   ctx.body = {
@@ -164,7 +180,7 @@ router.post('/api/login', async ctx => {
   };
 });
 
-// ===== 获取避难所信息 =====
+// ----- 获取避难所信息 -----
 router.get('/api/getShelterInfo', async ctx => {
   const roomId = ctx.query.roomId as string;
   if (!roomId) {
@@ -197,7 +213,7 @@ router.get('/api/getShelterInfo', async ctx => {
   };
 });
 
-// ===== 搜索地图 =====
+// ----- 搜索地图 -----
 router.post('/api/searchMap', async ctx => {
   const body: any = ctx.request.body;
   const { mapName, roomId } = body;
@@ -228,9 +244,7 @@ router.post('/api/searchMap', async ctx => {
       console.log(`🎉 避难所 ${roomId} 升级到 Lv.${shelter.level}`);
     }
 
-    if (isDbConnected) {
-      await shelter.save();
-    }
+    if (isDbConnected) await shelter.save();
   }
 
   ctx.body = {
@@ -240,7 +254,7 @@ router.post('/api/searchMap', async ctx => {
   };
 });
 
-// ===== 扣1加入 =====
+// ----- 扣1加入 -----
 router.post('/api/joinShelter', async ctx => {
   const body: any = ctx.request.body;
   const { userId, roomId } = body;
@@ -256,9 +270,7 @@ router.post('/api/joinShelter', async ctx => {
 
   if (!shelter.members.includes(userId)) {
     shelter.members.push(userId);
-    if (isDbConnected) {
-      await shelter.save();
-    }
+    if (isDbConnected) await shelter.save();
   }
 
   ctx.body = {
@@ -272,7 +284,7 @@ router.post('/api/joinShelter', async ctx => {
   };
 });
 
-// ===== 排行榜 =====
+// ----- 排行榜 -----
 router.get('/api/getRanking', async ctx => {
   const type = ctx.query.type || 'level';
 
@@ -299,7 +311,7 @@ router.get('/api/getRanking', async ctx => {
   ctx.body = { code: 0, data: { type, list } };
 });
 
-// ===== 获取避难所成员 =====
+// ----- 获取避难所成员 -----
 router.get('/api/getShelterMembers', async ctx => {
   const roomId = ctx.query.roomId as string;
   if (!roomId) {
@@ -323,7 +335,7 @@ router.get('/api/getShelterMembers', async ctx => {
   };
 });
 
-// ===== 领取离线收益 =====
+// ----- 领取离线收益 -----
 router.post('/api/claimOfflineRewards', async ctx => {
   const body: any = ctx.request.body;
   const { roomId, food, water } = body;
@@ -338,9 +350,7 @@ router.post('/api/claimOfflineRewards', async ctx => {
   shelter.resources.food += food || 0;
   shelter.resources.water += water || 0;
 
-  if (isDbConnected) {
-    await shelter.save();
-  }
+  if (isDbConnected) await shelter.save();
 
   ctx.body = {
     code: 0,
@@ -349,7 +359,25 @@ router.post('/api/claimOfflineRewards', async ctx => {
   };
 });
 
-// ===== 启动服务 =====
+// ----- 获取等级信息（新） -----
+router.get('/api/getLevelInfo', async ctx => {
+  const userId = ctx.query.userId as string;
+  if (!userId) {
+    ctx.status = 400;
+    ctx.body = { code: -1, message: 'userId 不能为空' };
+    return;
+  }
+
+  const user = await getOrCreateUser(userId);
+  const info = getLevelInfo(user.exp);
+
+  ctx.body = { code: 0, data: info };
+});
+
+// ============================================================
+// 启动服务
+// ============================================================
+
 app.use(bodyParser());
 app.use(router.routes());
 
@@ -359,5 +387,6 @@ connectDB().then(() => {
   app.listen(PORT, () => {
     console.log(`✅ 服务器已启动，端口: ${PORT}`);
     console.log(`📊 数据库状态: ${isDbConnected ? '已连接' : '内存模式'}`);
+    console.log(`📦 已加载配置: Level(150级), VIP(16级), Pet(6只), Ability(8个), Item(15种)`);
   });
 });
