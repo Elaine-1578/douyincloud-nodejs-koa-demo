@@ -192,7 +192,7 @@ router.get('/api/ping', async ctx => {
   ctx.body = { code: 0, message: 'pong', data: { serverTime: new Date().toISOString() } };
 });
 
-// ----- 登录（含天气） -----
+// ----- 登录 -----
 router.post('/api/login', async ctx => {
   const body: any = ctx.request.body;
   const userId = body.userId || 'user_' + Date.now();
@@ -215,6 +215,9 @@ router.post('/api/login', async ctx => {
     if (isDbConnected) await shelter.save();
   }
 
+  // ===== 计算用户等级信息 =====
+  const levelInfo = getLevelInfo(user.exp);
+
   ctx.body = {
     code: 0,
     message: '登录成功',
@@ -229,12 +232,22 @@ router.post('/api/login', async ctx => {
       diamonds: user.diamonds,
       shelterId: shelter.shelterId,
       roomId: shelter.roomId,
-      weather: shelter.weather || { icon: '☀️', name: '晴朗' }
+      weather: shelter.weather || { icon: '☀️', name: '晴朗' },
+      // 新增等级信息
+      levelInfo: {
+        level: user.level,
+        exp: user.exp,
+        remainingExp: levelInfo.remainingExp,
+        expNeeded: levelInfo.expNeeded,
+        progress: levelInfo.progress,
+        power: user.power,
+        isMaxLevel: levelInfo.isMaxLevel
+      }
     }
   };
 });
 
-// ----- 获取避难所信息（含天气） -----
+// ----- 获取避难所信息 -----
 router.get('/api/getShelterInfo', async ctx => {
   const roomId = ctx.query.roomId as string;
   if (!roomId) {
@@ -304,10 +317,10 @@ router.get('/api/getWeather', async ctx => {
   };
 });
 
-// ----- 搜索地图 -----
+// ----- 搜索地图（含玩家经验） -----
 router.post('/api/searchMap', async ctx => {
   const body: any = ctx.request.body;
-  const { mapName, roomId } = body;
+  const { mapName, roomId, userId } = body;
 
   if (!mapName) {
     ctx.status = 400;
@@ -321,6 +334,27 @@ router.post('/api/searchMap', async ctx => {
     exp: Math.floor(Math.random() * 20) + 10
   };
 
+  // ===== 给玩家加经验 =====
+  let levelUp = false;
+  let oldLevel = 1;
+  let newLevel = 1;
+
+  if (userId) {
+    const user = await getOrCreateUser(userId);
+    oldLevel = user.level;
+    const result = addExp(user.exp, rewards.exp);
+    user.exp = result.newExp;
+    user.level = Math.min(result.newLevel, 150);
+    user.power = 100 + (user.level - 1) * 10; // 简单战力公式
+    if (result.leveledUp) {
+      levelUp = true;
+      newLevel = user.level;
+      console.log(`🎉 玩家 ${userId} 升级到 Lv.${user.level}`);
+    }
+    if (isDbConnected) await user.save();
+  }
+
+  // ===== 避难所资源增加 =====
   if (roomId) {
     const shelter = await getOrCreateShelter(roomId);
     shelter.resources.food += rewards.food;
@@ -341,7 +375,59 @@ router.post('/api/searchMap', async ctx => {
   ctx.body = {
     code: 0,
     message: `搜索 ${mapName} 完成`,
-    data: { mapName, rewards, cooldown: 1800 }
+    data: {
+      mapName,
+      rewards,
+      cooldown: 1800,
+      levelUp: levelUp,
+      oldLevel: oldLevel,
+      newLevel: newLevel,
+      newExp: userId ? (await getOrCreateUser(userId)).exp : 0
+    }
+  };
+});
+
+// ----- 挂机收益 -----
+router.post('/api/afkReward', async ctx => {
+  const body: any = ctx.request.body;
+  const { userId, roomId, minutes } = body;
+
+  if (!userId || !roomId) {
+    ctx.status = 400;
+    ctx.body = { code: -1, message: 'userId 和 roomId 不能为空' };
+    return;
+  }
+
+  const user = await getOrCreateUser(userId);
+  const shelter = await getOrCreateShelter(roomId);
+
+  // 挂机收益：每分钟 50 经验 + 食物/水
+  const expGain = minutes * 50;
+  const foodGain = minutes * 2;
+  const waterGain = minutes * 1;
+
+  // 加玩家经验
+  const result = addExp(user.exp, expGain);
+  user.exp = result.newExp;
+  user.level = Math.min(result.newLevel, 150);
+  user.power = 100 + (user.level - 1) * 10;
+  if (isDbConnected) await user.save();
+
+  // 加避难所资源
+  shelter.resources.food += foodGain;
+  shelter.resources.water += waterGain;
+  if (isDbConnected) await shelter.save();
+
+  ctx.body = {
+    code: 0,
+    data: {
+      expGain: expGain,
+      foodGain: foodGain,
+      waterGain: waterGain,
+      newExp: user.exp,
+      newLevel: user.level,
+      leveledUp: result.leveledUp
+    }
   };
 });
 
