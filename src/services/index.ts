@@ -3,7 +3,7 @@
 // ============================================================
 
 export * from './levelService';
+export * from './vipService';
 // 后续添加：
-// export * from './vipService';
 // export * from './petService';
 // export * from './abilityService';
