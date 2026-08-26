@@ -11,16 +11,16 @@ import { IShelter, createDefaultShelter } from './models/Shelter';
 import { LEVEL_TABLE } from './config/LevelTable';
 import { VIP_TABLE } from './config/VIPTable';
 import { PET_TABLE } from './config/PetTable';
-import { ABILITY_TABLE, randomDrawAbility, getBasicAbilities, getRareAbilities } from './config/AbilityTable';
-import { ITEM_TABLE, getItemById } from './config/ItemTable';
+import { ABILITY_TABLE } from './config/AbilityTable';
+import { ITEM_TABLE } from './config/ItemTable';
 import { WEATHER_LIST, getRandomWeather, getWeatherEffect, isHighAbility } from './config/WeatherTable';
 
 // ===== 服务层 =====
-import { getLevelInfo, addExp, calcTotalPower, canLevelUp } from './services/levelService';
-import { getVIPInfo, getExpBonus, getRareBonus, getDailyPullLimit, canDrawToday } from './services/vipService';
+import { getLevelInfo, addExp, calcTotalPower } from './services/levelService';
+import { getVIPInfo, getExpBonus, getRareBonus, getDailyPullLimit } from './services/vipService';
 import { getPetInfo, levelUpPet, calcPetPower, getPetCounterBonus, getAllPets } from './services/petService';
 import { drawAbility, drawTenAbilities, getPityInfo, equipAbility, replaceAbility } from './services/abilityService';
-import { shouldRefreshWeather, refreshWeather, getCurrentWeatherInfo, calculateAbilityWithWeather, getWeatherName, getWeatherIcon } from './services/weatherService';
+import { shouldRefreshWeather, refreshWeather, getCurrentWeatherInfo, calculateAbilityWithWeather } from './services/weatherService';
 
 const app = new Koa();
 const router = new Router();
