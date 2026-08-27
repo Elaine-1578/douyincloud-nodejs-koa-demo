@@ -215,7 +215,6 @@ router.post('/api/login', async ctx => {
     if (isDbConnected) await shelter.save();
   }
 
-  // ===== 计算用户等级信息 =====
   const levelInfo = getLevelInfo(user.exp);
 
   ctx.body = {
@@ -333,7 +332,6 @@ router.post('/api/searchMap', async ctx => {
     exp: Math.floor(Math.random() * 20) + 10
   };
 
-  // ===== 给玩家加经验 =====
   let levelUp = false;
   let oldLevel = 1;
   let newLevel = 1;
@@ -355,7 +353,6 @@ router.post('/api/searchMap', async ctx => {
     if (isDbConnected) await user.save();
   }
 
-  // ===== 避难所资源增加 =====
   if (roomId) {
     const shelter = await getOrCreateShelter(roomId);
     shelter.resources.food += rewards.food;
@@ -373,7 +370,6 @@ router.post('/api/searchMap', async ctx => {
     if (isDbConnected) await shelter.save();
   }
 
-  // ===== 返回数据（确保 levelUp、newLevel、newExp 都在） =====
   ctx.body = {
     code: 0,
     message: `搜索 ${mapName} 完成`,
@@ -426,6 +422,46 @@ router.post('/api/afkReward', async ctx => {
       newExp: user.exp,
       newLevel: user.level,
       leveledUp: result.leveledUp
+    }
+  };
+});
+
+// ----- 使用物品 -----
+router.post('/api/useItem', async ctx => {
+  const body: any = ctx.request.body;
+  const { userId, itemId, count } = body;
+
+  if (!userId || !itemId) {
+    ctx.status = 400;
+    ctx.body = { code: -1, message: 'userId 和 itemId 不能为空' };
+    return;
+  }
+
+  const user = await getOrCreateUser(userId);
+  const resources = user.resources || {};
+
+  const currentCount = resources[itemId] || 0;
+  const useCount = count || 1;
+
+  if (currentCount < useCount) {
+    ctx.status = 400;
+    ctx.body = { code: -1, message: '物品数量不足' };
+    return;
+  }
+
+  resources[itemId] = currentCount - useCount;
+  if (resources[itemId] <= 0) delete resources[itemId];
+  user.resources = resources;
+
+  if (isDbConnected) await user.save();
+
+  ctx.body = {
+    code: 0,
+    message: '使用成功',
+    data: {
+      itemId: itemId,
+      usedCount: useCount,
+      remaining: resources[itemId] || 0
     }
   };
 });
